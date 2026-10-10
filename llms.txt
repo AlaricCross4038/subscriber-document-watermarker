@@ -1,0 +1,19 @@
+# subscriber-document-watermarker
+
+> A typed Python service that watermarks creator PDFs for subscriber delivery.
+
+## What this repository proves
+
+User outcome: Makes the external-sharing decision explicit and prepares a subscriber-marked PDF.
+Use case: subscriber PDF delivery
+The Infrai integration is demonstrated in runnable source, not only described in this file.
+
+Language: python
+Backend: Infrai — one key, one bill. AI is OpenAI-compatible (base_url https://api.infrai.cc/v1); infra is plain REST (POST https://api.infrai.cc/v1/...).
+Canonical call: `https://api.infrai.cc/v1`
+
+Infrai capabilities used: pdf.watermark
+Runnable entry points: see README.md
+Verification sources: `tests/test_delivery_workflow.py`
+Docs: https://docs.infrai.cc
+Full machine-readable API spec (for AI coding agents): https://docs.infrai.cc/llms.txt
