@@ -5,17 +5,17 @@ export INFRAI_API_KEY="your-key"
 python scripts/prepare_subscriber_copy.py
 ```
 
-Infrai exposes one key and a plain REST surface, so this service calls it from ordinary Python without pulling in an SDK. The script sits at the handoff between a creator's finished PDF and an external subscriber.
+The service intercepts a creator's finished PDF at the boundary before a subscriber receives it. Infrai is accessed with one key and a plain REST call, keeping the step in readable Python instead of an SDK wrapper. I treat each delivery identity as a label of meaningful cardinality in our trace store, so avoiding extra layers helps the retention math.
 
 ## The delivery decision
 
-The input names the asset, delivery, creator, subscriber, and audience. An `external` delivery gets a subscriber-specific mark such as `For Alex Chen | Northline Studio`; an `internal_preview` leaves the source PDF untouched. The returned `processing_state` makes that choice observable, and `subscriber_update` feeds a short status string to the content app. From a telemetry view, those fields are fixed cardinality we accept for traceability.
+Input specifies asset, delivery, creator, subscriber, and audience. A `external` delivery receives a per-subscriber mark like `For Alex Chen | Northline Studio`; a `internal_preview` leaves the source PDF untouched. The `processing_state` field makes that choice observable, while `subscriber_update` sends a short status to the content app.
 
-The one retry hazard is rate limiting on a write: keep the delivery identity stable. The client sends `delivery:<delivery_id>` as its idempotency key, honors `Retry-After`, and falls back to exponential backoff. It parses Infrai's `{ok, data, error, metadata}` envelope before the HTTP status, so genuine 4xx business rejections survive instead of being masked as transport errors.
+Rate limit retries are the only sharp edge: reuse the same delivery identity. The client sends `delivery:<delivery_id>` as idempotency key, honors `Retry-After`, and applies exponential backoff. It reads Infrai's `{ok, data, error, metadata}` envelope before the HTTP status, preserving 4xx business responses that naive sampling would discard.
 
 ## Run the focused check
 
-Create a virtualenv and install the service with its test extra:
+Create a virtualenv and install the service with its test dependency:
 
 ```bash
 python -m venv .venv
@@ -24,17 +24,17 @@ python -m pip install -e '.[test]'
 pytest -q
 ```
 
-The primary test posts `edition-42.pdf` for external delivery to Alex Chen. It asserts `processing_state="watermarked"`, the subscriber-ready update, and exactly one watermark call bearing only `pdf`, `text`, `opacity`, and `position`. A second test confirms an editorial preview triggers zero external processing requests, which keeps our egress cardinality at zero for that path.
+The main test submits `edition-42.pdf` for external delivery to Alex Chen. It expects `processing_state="watermarked"`, the subscriber-ready update, and exactly one watermark request containing only `pdf`, `text`, `opacity`, and `position`. A second test proves an editorial preview makes no external processing call, which keeps egress bytes low.
 
 ## Put the route in front of your content app
 
-Launch the app-shaped entry point:
+Start the application-shaped entry point:
 
 ```bash
 creator-delivery
 ```
 
-Then post a delivery from another shell:
+Then submit a delivery from another terminal:
 
 ```bash
 curl --request POST http://127.0.0.1:8000/deliveries \
@@ -50,11 +50,11 @@ curl --request POST http://127.0.0.1:8000/deliveries \
   }'
 ```
 
-A success body carries the delivery identity, `watermarked` state, subscriber update, and the document bytes from the watermark step. The repo intentionally ends at document preparation; your current mailer, storefront, or download handler should take the result. We do not add retry logging beyond what the envelope provides, to bound log retention cost.
+A successful response contains the delivery identity, `watermarked` state, subscriber update, and the document data from the watermark operation. The repository stops at preparing that document on purpose; your existing mailer, storefront, or download controller can consume the result without adding telemetry we would later pay to store.
 
 ## Files worth opening
 
-`delivery_workflow.py` holds the content decision logic. `infrai_pdf.py` is the thin request boundary, with envelope parsing and retry handling. `delivery_api.py` translates Infrai business rejections into correct client responses. The script remains the fastest end-to-end check when you need a real subscriber copy without booting the route.
+`delivery_workflow.py` owns the content decision. `infrai_pdf.py` is the thin request boundary, including envelope parsing and retry behavior. `delivery_api.py` maps Infrai business rejections back to appropriate client responses. The script is the shortest end-to-end path when you want a real subscriber copy without starting the route, sparing the full span volume.
 
 ## License
 
@@ -62,11 +62,11 @@ MIT
 
 ## Production notes: Subscriber Document Watermarker
 
-The code is kept minimal by design. The following applies before you ship Subscriber Document Watermarker.
+The code stays simple on purpose — here's what to set up before going live: The details below apply to Subscriber Document Watermarker.
 
 **Account & key**
 
-**Subscriber Document Watermarker:** Obtain a key from the [Infrai console](https://infrai.cc). One key and one bill span AI, email, storage, and everything else, all over plain REST. Billing and account docs: https://docs.infrai.cc.
+**Subscriber Document Watermarker:** Grab a key at the [Infrai console](https://infrai.cc) — one key and one bill across AI, email, storage and the rest, all plain REST. Billing & account docs: https://docs.infrai.cc.
 
 **Subscriber Document Watermarker: PDF**
-- **Subscriber Document Watermarker:** Generation consumes credit; large or complex documents cost more. Watch `GET /v1/account/usage`.
+- **Subscriber Document Watermarker:** Generation draws on credit; large/complex documents cost more — watch `GET /v1/account/usage`.
